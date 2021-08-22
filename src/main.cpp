@@ -1,22 +1,41 @@
+#define GLEW_STATIC
+
+#include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <string>
 #include <iostream>
+#include <cmath>
 
+/* Screen Variables */
 const int screenWidth = 1280;
 const int screenHeight = 720;
 
+/* Player Variables */
 float fPlayerX = 8.0f;
 float fPlayerY = 8.0f;
 float fPlayerA = 0.0f;
 
+/* Map Variables */
 int mapWidth = 16;
 int mapHeight = 16;
+std::string map;
 
-
+/* Camera Variables */
 float fFOV = 3.1459f / 4.0f;
 const float fDepth = 16;
 
-std::string map;
+/* Image Processing Variables */
+float sharpenKernel[3][3] = { {2.0f,   2.0f, 2.0f},
+                              {2.0f, -15.0f, 2.0f},
+                              {2.0f,   2.0f, 2.0f} };
+
+float edgeKernel[3][3] = { {1.0f,  1.0f, 1.0f},
+                           {1.0f, -8.0f, 1.0f},
+                           {1.0f,  1.0f, 1.0f} };
+
+float blurKernel[3][3] = { {1.0f / 16, 2.0f / 16, 1.0f / 16},
+                           {2.0f / 16, 4.0f / 16, 2.0f / 16},
+                           {1.0f / 16, 2.0f / 16, 1.0f / 16} };
 
 void CreateBasicMap(std::string& map, int& mapWidth, int& mapHeight)
 {
@@ -66,6 +85,7 @@ void CreateLabyrinthMap(std::string& map, int& mapWidth, int& mapHeight)
     map += "XXXXXXX  XXXXXXX";
 }
 
+
 inline int GetMapIndex(int x, int y)
 {
     return y * mapWidth + x;
@@ -78,6 +98,63 @@ inline int GetPixelIndex(int x, int y)
     return y * screenWidth * 3 + x * 3;
 }
 
+void ApplyKernel(float kernel[3][3], unsigned char* pixels, int pixelsWidth, int pixelsHeight)
+{
+    /* Copy Pixels to NewPixels */
+    unsigned char* newPixels = new unsigned char[pixelsWidth * pixelsHeight * 3];
+    for (int x = 0; x < screenWidth; x++)
+    {
+        for (int y = 0; y < screenHeight; y++)
+        {
+            int index = GetPixelIndex(x, y);
+            newPixels[index] = pixels[index];
+            newPixels[index + 1] = pixels[index + 1];
+            newPixels[index + 2] = pixels[index + 2];
+        }
+    }
+
+    /* Apply Kernel */
+    for (int x = 0; x < screenWidth; x++)
+    {
+        for (int y = 0; y < screenHeight; y++)
+        {
+            unsigned char collectivR = 0;
+            unsigned char collectivG = 0;
+            unsigned char collectivB = 0;
+            for (int kI = -1; kI < 1; kI++)
+            {
+                for (int kJ = -1; kJ < 1; kJ++)
+                {
+                    int index = GetPixelIndex(x + kI, y + kJ);
+                    if (!(index < 0 || index > pixelsWidth * pixelsHeight * 3))
+                    {
+                        collectivR += pixels[index    ] * kernel[kI + 1][kJ + 1];
+                        collectivG += pixels[index + 1] * kernel[kI + 1][kJ + 1];
+                        collectivB += pixels[index + 2] * kernel[kI + 1][kJ + 1];
+                    }
+                }
+            }
+            int index = GetPixelIndex(x, y);
+            newPixels[index    ] = std::min(collectivR, (unsigned char)255);
+            newPixels[index + 1] = std::min(collectivG, (unsigned char)255);
+            newPixels[index + 2] = std::min(collectivB, (unsigned char)255);
+        }
+    }
+
+    /* Copy NewPixels to Pixels */
+    for (int x = 0; x < screenWidth; x++)
+    {
+        for (int y = 0; y < screenHeight; y++)
+        {
+            int index = GetPixelIndex(x, y);
+            pixels[index    ] = newPixels[index];
+            pixels[index + 1] = newPixels[index + 1];
+            pixels[index + 2] = newPixels[index + 2];
+        }
+    }
+
+    delete[] newPixels;
+}
 
 int main(void)
 {
@@ -97,9 +174,15 @@ int main(void)
 
     /* Make the window's context current */
     glfwMakeContextCurrent(window);
+    
+    if (glewInit() != GLEW_OK)
+        return -1;
+
+    std::cout << glGetString(GL_VERSION) << std::endl;
 
     /* Create Map */
     CreateBasicMap(map, mapWidth, mapHeight);
+    //CreateLabyrinthMap(map, mapWidth, mapHeight);
 
     /* Filling Map pixels to default values */
     unsigned char* mapPixels = new unsigned char[screenWidth * screenHeight * 3];
@@ -225,6 +308,7 @@ int main(void)
                 else if (y > ceiling && y <= floor)  //Wall
                 {
                     unsigned char shadedValue = 255 / (fDistance + 1);
+                    //unsigned char shadedValue = std::max(255 * (0.8f - (fDistance / fDepth)), 0.0f);
                     mapPixels[GetPixelIndex(x, y)    ] = shadedValue;
                     mapPixels[GetPixelIndex(x, y) + 1] = shadedValue;
                     mapPixels[GetPixelIndex(x, y) + 2] = shadedValue;
@@ -240,6 +324,10 @@ int main(void)
             }
         }
 
+        //ApplyKernel(sharpenKernel, mapPixels, screenWidth, screenHeight);
+        //ApplyKernel(edgeKernel, mapPixels, screenWidth, screenHeight);
+        //ApplyKernel(blurKernel, mapPixels, screenWidth, screenHeight);
+
         /* Render here */
         glClear(GL_COLOR_BUFFER_BIT);
         /* Draw the pixels of the Map */
@@ -250,6 +338,7 @@ int main(void)
         glfwPollEvents();
     }
 
+    delete[] mapPixels;
     glfwTerminate();
     return 0;
 }
